@@ -1,18 +1,28 @@
-import { Client, middleware, MiddlewareConfig, WebhookEvent } from "@line/bot-sdk";
+import { Client, HTTPError, middleware, MiddlewareConfig, WebhookEvent } from "@line/bot-sdk";
 import { Router } from "express";
-import { AccrevoxClient } from "../services/accrevoxClient.js";
-import { AiAccessPolicy } from "../services/aiAccessPolicy.js";
-import { CreditLedger } from "../services/creditLedger.js";
-import { DocumentOrchestrator } from "../services/documentOrchestrator.js";
 import { CreditWalletPrismaRepository } from "../repositories/creditWalletPrismaRepository.js";
 import { DocumentRequestPrismaRepository } from "../repositories/documentRequestPrismaRepository.js";
 import { LineUserConnectionPrismaRepository } from "../repositories/lineUserConnectionPrismaRepository.js";
 import { TenantPrismaRepository } from "../repositories/tenantPrismaRepository.js";
+import { AccrevoxClient } from "../services/accrevoxClient.js";
+import { AiAccessPolicy } from "../services/aiAccessPolicy.js";
+import { CreditLedger } from "../services/creditLedger.js";
+import { DocumentOrchestrator } from "../services/documentOrchestrator.js";
 
 const tenantRepository = new TenantPrismaRepository();
 const creditLedger = new CreditLedger(new CreditWalletPrismaRepository());
 const documentRequestRepository = new DocumentRequestPrismaRepository();
 const lineUserConnectionRepository = new LineUserConnectionPrismaRepository();
+
+function asyncRoute(handler: (req: RouterRequest, res: RouterResponse, next: RouterNext) => Promise<void>) {
+  return (req: RouterRequest, res: RouterResponse, next: RouterNext) => {
+    void handler(req, res, next).catch(next);
+  };
+}
+
+type RouterRequest = Parameters<Router["post"]>[1] extends (req: infer T, res: any, next: any) => any ? T : never;
+type RouterResponse = Parameters<Router["post"]>[1] extends (req: any, res: infer T, next: any) => any ? T : never;
+type RouterNext = Parameters<Router["post"]>[1] extends (req: any, res: any, next: infer T) => any ? T : never;
 
 function createMiddlewareConfig(channelSecret: string, channelAccessToken: string): MiddlewareConfig {
   return {
@@ -21,10 +31,30 @@ function createMiddlewareConfig(channelSecret: string, channelAccessToken: strin
   };
 }
 
-async function handleEvent(event: WebhookEvent, tenantId: string): Promise<void> {
-  const tenant = await tenantRepository.findByCode(tenantId);
+async function sendLineText(
+  lineClient: Client,
+  event: WebhookEvent,
+  text: string
+): Promise<void> {
+  const messages = [
+    {
+      type: "text" as const,
+      text
+    }
+  ];
+
+  if (event.source.type === "user") {
+    await lineClient.pushMessage(event.source.userId, messages);
+    return;
+  }
+
+  await lineClient.replyMessage(event.replyToken, messages);
+}
+
+async function handleEvent(event: WebhookEvent, tenantCode: string): Promise<void> {
+  const tenant = await tenantRepository.findByCode(tenantCode);
   if (!tenant) {
-    throw new Error(`ไม่พบ tenant: ${tenantId}`);
+    throw new Error(`Tenant not found: ${tenantCode}`);
   }
 
   const lineClient = new Client({
@@ -57,26 +87,28 @@ async function handleEvent(event: WebhookEvent, tenantId: string): Promise<void>
       ? await handleTextMessage(event.message.text, lineUserId, tenant, orchestrator)
       : await orchestrator.handleChatMessage(event.message.text, lineUserId);
 
-    await lineClient.replyMessage({
-      replyToken: event.replyToken,
-      messages: [
-        {
-          type: "text",
-          text: replyText
-        }
-      ]
+    console.log("Replying to LINE event", {
+      tenantCode,
+      eventType: event.type,
+      sourceType: event.source.type,
+      messageText: event.message.text,
+      replyText
     });
+
+    await sendLineText(lineClient, event, replyText);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
-    await lineClient.replyMessage({
-      replyToken: event.replyToken,
-      messages: [
-        {
-          type: "text",
-          text: `ไม่สามารถสร้างเอกสารได้\n${message}`
-        }
-      ]
-    });
+    const message = error instanceof Error ? error.message : "Unknown webhook error";
+    if (error instanceof HTTPError) {
+      console.error("LINE API error", {
+        statusCode: error.statusCode,
+        message: error.message,
+        details: error.body
+      });
+    } else {
+      console.error("Webhook event handling error", error);
+    }
+
+    await sendLineText(lineClient, event, `ไม่สามารถสร้างเอกสารได้\n${message}`);
   }
 }
 
@@ -88,7 +120,7 @@ async function handleTextMessage(
 ): Promise<string> {
   const normalizedText = messageText.trim();
 
-  if (normalizedText === "เชื่อมต่อ Accrevox") {
+  if (normalizedText === "เชื่อมต่อ Accrevox" || normalizedText === "เชื่อมต่อ accrevox") {
     await lineUserConnectionRepository.setAwaitingApiKey(tenant.id, lineUserId);
     return "กรุณาส่ง Company API Key ของ Accrevox เพื่อเชื่อมต่อ";
   }
@@ -125,7 +157,7 @@ async function handleTextMessage(
 export function createLineWebhookRouter(): Router {
   const router = Router();
 
-  router.post("/:tenantId", async (req, res, next) => {
+  router.post("/:tenantId", asyncRoute(async (req, res, next) => {
     const tenant = await tenantRepository.findByCode(req.params.tenantId);
     if (!tenant) {
       res.status(404).json({ message: "Tenant not found" });
@@ -137,14 +169,14 @@ export function createLineWebhookRouter(): Router {
     );
 
     tenantMiddleware(req, res, next);
-  });
+  }));
 
-  router.post("/:tenantId", async (req, res) => {
+  router.post("/:tenantId", asyncRoute(async (req, res) => {
     const events = req.body.events as WebhookEvent[];
-    const tenantId = req.params.tenantId;
-    await Promise.all(events.map((event) => handleEvent(event, tenantId)));
+    const tenantCode = req.params.tenantId;
+    await Promise.all(events.map((event) => handleEvent(event, tenantCode)));
     res.status(200).json({ ok: true });
-  });
+  }));
 
   return router;
 }

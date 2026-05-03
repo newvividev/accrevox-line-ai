@@ -2,6 +2,19 @@ import { LineUserStateType } from "@prisma/client";
 import { prisma } from "../db.js";
 
 export class LineUserConnectionPrismaRepository {
+  async listConnectionsByTenantId(tenantId: string, limit = 50) {
+    return prisma.lineUserConnection.findMany({
+      where: {
+        tenantId,
+        isActive: true
+      },
+      orderBy: {
+        updatedAt: "desc"
+      },
+      take: limit
+    });
+  }
+
   async setAwaitingApiKey(tenantId: string, lineUserId: string) {
     return prisma.lineUserState.upsert({
       where: {

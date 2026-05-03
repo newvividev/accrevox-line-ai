@@ -1,9 +1,13 @@
 import express, { RequestHandler, Router } from "express";
 import { CreditWalletPrismaRepository } from "../repositories/creditWalletPrismaRepository.js";
+import { DocumentRequestPrismaRepository } from "../repositories/documentRequestPrismaRepository.js";
+import { LineUserConnectionPrismaRepository } from "../repositories/lineUserConnectionPrismaRepository.js";
 import { TenantPrismaRepository } from "../repositories/tenantPrismaRepository.js";
 
 const tenantRepository = new TenantPrismaRepository();
 const creditWalletRepository = new CreditWalletPrismaRepository();
+const documentRequestRepository = new DocumentRequestPrismaRepository();
+const lineUserConnectionRepository = new LineUserConnectionPrismaRepository();
 
 type TopUpBody = {
   amount?: number;
@@ -108,6 +112,42 @@ export function createAdminRouter(): Router {
       tenantId: tenant.id,
       tenantCode: tenant.code,
       items: transactions
+    });
+  }));
+
+  router.get("/tenants/:tenantCode/line-connections", asyncRoute(async (req, res) => {
+    const tenant = await tenantRepository.findByCode(req.params.tenantCode);
+    if (!tenant) {
+      res.status(404).json({ message: "Tenant not found" });
+      return;
+    }
+
+    const limitValue = typeof req.query.limit === "string" ? Number(req.query.limit) : 50;
+    const limit = Number.isNaN(limitValue) ? 50 : Math.min(Math.max(limitValue, 1), 100);
+    const items = await lineUserConnectionRepository.listConnectionsByTenantId(tenant.id, limit);
+
+    res.status(200).json({
+      tenantId: tenant.id,
+      tenantCode: tenant.code,
+      items
+    });
+  }));
+
+  router.get("/tenants/:tenantCode/document-requests", asyncRoute(async (req, res) => {
+    const tenant = await tenantRepository.findByCode(req.params.tenantCode);
+    if (!tenant) {
+      res.status(404).json({ message: "Tenant not found" });
+      return;
+    }
+
+    const limitValue = typeof req.query.limit === "string" ? Number(req.query.limit) : 20;
+    const limit = Number.isNaN(limitValue) ? 20 : Math.min(Math.max(limitValue, 1), 100);
+    const items = await documentRequestRepository.listByTenantId(tenant.id, limit);
+
+    res.status(200).json({
+      tenantId: tenant.id,
+      tenantCode: tenant.code,
+      items
     });
   }));
 

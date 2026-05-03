@@ -27,6 +27,23 @@ export type FailDocumentRequestInput = {
 };
 
 export class DocumentRequestPrismaRepository {
+  async listByTenantId(tenantId: string, limit = 20) {
+    return prisma.documentRequest.findMany({
+      where: { tenantId },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: limit,
+      include: {
+        jobs: {
+          orderBy: {
+            createdAt: "desc"
+          }
+        }
+      }
+    });
+  }
+
   async createReceivedRequest(input: CreateDocumentRequestInput) {
     return prisma.documentRequest.create({
       data: {

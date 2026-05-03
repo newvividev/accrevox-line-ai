@@ -15,3 +15,6 @@ pnpm-debug.log*
 coverage/
 .prisma/
 prisma/migrations/
+cloudflared.exe
+cloudflared.log
+cloudflared.err.log

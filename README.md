@@ -150,6 +150,8 @@ GET  /admin/tenants/:tenantCode
 GET  /admin/tenants/:tenantCode/wallet
 POST /admin/tenants/:tenantCode/wallet/topup
 GET  /admin/tenants/:tenantCode/wallet/transactions?limit=20
+GET  /admin/tenants/:tenantCode/line-connections?limit=50
+GET  /admin/tenants/:tenantCode/document-requests?limit=20
 ```
 
 ตัวอย่าง top-up:
