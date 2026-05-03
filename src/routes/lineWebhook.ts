@@ -1,4 +1,4 @@
-import { Client, HTTPError, middleware, MiddlewareConfig, WebhookEvent } from "@line/bot-sdk";
+import { Client, HTTPError, MessageEvent, middleware, MiddlewareConfig, WebhookEvent } from "@line/bot-sdk";
 import { Router } from "express";
 import { CreditWalletPrismaRepository } from "../repositories/creditWalletPrismaRepository.js";
 import { DocumentRequestPrismaRepository } from "../repositories/documentRequestPrismaRepository.js";
@@ -13,6 +13,12 @@ const tenantRepository = new TenantPrismaRepository();
 const creditLedger = new CreditLedger(new CreditWalletPrismaRepository());
 const documentRequestRepository = new DocumentRequestPrismaRepository();
 const lineUserConnectionRepository = new LineUserConnectionPrismaRepository();
+type TextMessageEvent = MessageEvent & {
+  message: {
+    type: "text";
+    text: string;
+  };
+};
 
 function asyncRoute(handler: (req: RouterRequest, res: RouterResponse, next: RouterNext) => Promise<void>) {
   return (req: RouterRequest, res: RouterResponse, next: RouterNext) => {
@@ -31,7 +37,11 @@ function createMiddlewareConfig(channelSecret: string, channelAccessToken: strin
   };
 }
 
-async function sendLineText(lineClient: Client, event: WebhookEvent, text: string): Promise<void> {
+function getSingleRouteParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] : value ?? "";
+}
+
+async function sendLineText(lineClient: Client, event: TextMessageEvent, text: string): Promise<void> {
   const messages = [
     {
       type: "text" as const,
@@ -92,6 +102,8 @@ function buildHelpMessage(): string {
     "5. ดูสินค้า",
     "6. ดูคำขอล่าสุด",
     "7. ออกใบเสนอราคาแบบคำสั่งตายตัว",
+    "8. ออกใบแจ้งหนี้แบบคำสั่งตายตัว",
+    "9. ออกใบเสร็จรับเงินแบบคำสั่งตายตัว",
     "",
     "ตัวอย่างคำสั่ง",
     "เชื่อมต่อ Accrevox",
@@ -101,7 +113,9 @@ function buildHelpMessage(): string {
     "มีสินค้าอะไรบ้าง",
     "ดูคำขอล่าสุด",
     "ออกใบเสนอราคา ลูกค้า=บริษัท ABC วันที่=2026-05-03 รายการ=ปากกา,10,20",
-    "ออกใบเสนอราคา ลูกค้า=บริษัท ABC วันที่=2026-05-03 รายการ=ปากกา 10 20"
+    "ออกใบเสนอราคา ลูกค้า=บริษัท ABC วันที่=2026-05-03 รายการ=ปากกา 10 20",
+    "ออกใบแจ้งหนี้ ลูกค้า=บริษัท ABC วันที่=2026-05-03 ครบกำหนด=2026-05-10 รายการ=ปากกา,10,20",
+    "ออกใบเสร็จ ลูกค้า=บริษัท ABC วันที่=2026-05-03 ครบกำหนด=2026-05-03 รายการ=ปากกา,10,20"
   ].join("\n");
 }
 
@@ -145,34 +159,36 @@ async function handleEvent(event: WebhookEvent, tenantCode: string): Promise<voi
     return;
   }
 
+  const messageEvent = event as TextMessageEvent;
+
   try {
-    const lineUserId = event.source.type === "user" ? event.source.userId : undefined;
+    const lineUserId = messageEvent.source.type === "user" ? messageEvent.source.userId : undefined;
     const replyText = lineUserId
-      ? await handleTextMessage(event.message.text, lineUserId, tenant, orchestrator)
-      : await orchestrator.handleChatMessage(event.message.text, lineUserId);
+      ? await handleTextMessage(messageEvent.message.text, lineUserId, tenant, orchestrator)
+      : await orchestrator.handleChatMessage(messageEvent.message.text, lineUserId);
 
     console.log("Replying to LINE event", {
       tenantCode,
-      eventType: event.type,
-      sourceType: event.source.type,
-      messageText: event.message.text,
+      eventType: messageEvent.type,
+      sourceType: messageEvent.source.type,
+      messageText: messageEvent.message.text,
       replyText
     });
 
-    await sendLineText(lineClient, event, replyText);
+    await sendLineText(lineClient, messageEvent, replyText);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown webhook error";
     if (error instanceof HTTPError) {
       console.error("LINE API error", {
         statusCode: error.statusCode,
         message: error.message,
-        details: error.body
+        details: (error as HTTPError & { body?: unknown }).body
       });
     } else {
       console.error("Webhook event handling error", error);
     }
 
-    await sendLineText(lineClient, event, `ไม่สามารถสร้างเอกสารได้\n${message}`);
+    await sendLineText(lineClient, messageEvent, `ไม่สามารถสร้างเอกสารได้\n${message}`);
   }
 }
 
@@ -303,7 +319,8 @@ export function createLineWebhookRouter(): Router {
   const router = Router();
 
   router.post("/:tenantId", asyncRoute(async (req, res, next) => {
-    const tenant = await tenantRepository.findByCode(req.params.tenantId);
+    const tenantCode = getSingleRouteParam(req.params.tenantId);
+    const tenant = await tenantRepository.findByCode(tenantCode);
     if (!tenant) {
       res.status(404).json({ message: "Tenant not found" });
       return;
@@ -318,7 +335,7 @@ export function createLineWebhookRouter(): Router {
 
   router.post("/:tenantId", asyncRoute(async (req, res) => {
     const events = req.body.events as WebhookEvent[];
-    const tenantCode = req.params.tenantId;
+    const tenantCode = getSingleRouteParam(req.params.tenantId);
     await Promise.all(events.map((event) => handleEvent(event, tenantCode)));
     res.status(200).json({ ok: true });
   }));

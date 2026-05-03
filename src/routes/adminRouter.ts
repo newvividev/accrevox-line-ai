@@ -14,6 +14,10 @@ type TopUpBody = {
   reason?: string;
 };
 
+function getSingleRouteParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] : value ?? "";
+}
+
 function asyncRoute(handler: RequestHandler): RequestHandler {
   return (req, res, next) => {
     Promise.resolve(handler(req, res, next)).catch(next);
@@ -25,7 +29,8 @@ export function createAdminRouter(): Router {
   router.use(express.json());
 
   router.get("/tenants/:tenantCode", asyncRoute(async (req, res) => {
-    const tenant = await tenantRepository.getAdminSummaryByCode(req.params.tenantCode);
+    const tenantCode = getSingleRouteParam(req.params.tenantCode);
+    const tenant = await tenantRepository.getAdminSummaryByCode(tenantCode);
     if (!tenant) {
       res.status(404).json({ message: "Tenant not found" });
       return;
@@ -57,7 +62,8 @@ export function createAdminRouter(): Router {
   }));
 
   router.get("/tenants/:tenantCode/wallet", asyncRoute(async (req, res) => {
-    const tenant = await tenantRepository.findByCode(req.params.tenantCode);
+    const tenantCode = getSingleRouteParam(req.params.tenantCode);
+    const tenant = await tenantRepository.findByCode(tenantCode);
     if (!tenant) {
       res.status(404).json({ message: "Tenant not found" });
       return;
@@ -72,7 +78,8 @@ export function createAdminRouter(): Router {
   }));
 
   router.post("/tenants/:tenantCode/wallet/topup", asyncRoute(async (req, res) => {
-    const tenant = await tenantRepository.findByCode(req.params.tenantCode);
+    const tenantCode = getSingleRouteParam(req.params.tenantCode);
+    const tenant = await tenantRepository.findByCode(tenantCode);
     if (!tenant) {
       res.status(404).json({ message: "Tenant not found" });
       return;
@@ -98,7 +105,8 @@ export function createAdminRouter(): Router {
   }));
 
   router.get("/tenants/:tenantCode/wallet/transactions", asyncRoute(async (req, res) => {
-    const tenant = await tenantRepository.findByCode(req.params.tenantCode);
+    const tenantCode = getSingleRouteParam(req.params.tenantCode);
+    const tenant = await tenantRepository.findByCode(tenantCode);
     if (!tenant) {
       res.status(404).json({ message: "Tenant not found" });
       return;
@@ -116,7 +124,8 @@ export function createAdminRouter(): Router {
   }));
 
   router.get("/tenants/:tenantCode/line-connections", asyncRoute(async (req, res) => {
-    const tenant = await tenantRepository.findByCode(req.params.tenantCode);
+    const tenantCode = getSingleRouteParam(req.params.tenantCode);
+    const tenant = await tenantRepository.findByCode(tenantCode);
     if (!tenant) {
       res.status(404).json({ message: "Tenant not found" });
       return;
@@ -134,7 +143,8 @@ export function createAdminRouter(): Router {
   }));
 
   router.get("/tenants/:tenantCode/document-requests", asyncRoute(async (req, res) => {
-    const tenant = await tenantRepository.findByCode(req.params.tenantCode);
+    const tenantCode = getSingleRouteParam(req.params.tenantCode);
+    const tenant = await tenantRepository.findByCode(tenantCode);
     if (!tenant) {
       res.status(404).json({ message: "Tenant not found" });
       return;

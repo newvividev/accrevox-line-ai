@@ -1,22 +1,24 @@
-export type ParsedQuotationItem = {
+export type ParsedDocumentItem = {
   productName: string;
   quantity: number;
   unitPrice: number;
 };
 
-export type ParsedQuotationCommand =
+export type ParsedDocumentCommand =
   | {
-      kind: "create_quotation";
+      kind: "create_document";
+      documentType: "quotation" | "invoice" | "receipt";
       contactName: string;
       issuedDate: string;
-      items: ParsedQuotationItem[];
+      dueDate?: string;
+      items: ParsedDocumentItem[];
     }
   | {
       kind: "unsupported";
       reason: string;
     };
 
-function parseItems(rawItems: string): ParsedQuotationItem[] {
+function parseItems(rawItems: string): ParsedDocumentItem[] {
   return rawItems
     .split(";")
     .map((chunk) => chunk.trim())
@@ -55,22 +57,47 @@ function parseItems(rawItems: string): ParsedQuotationItem[] {
     });
 }
 
-export function parseChatCommand(message: string): ParsedQuotationCommand {
-  if (!message.includes("ออกใบเสนอราคา")) {
+function detectDocumentType(message: string): "quotation" | "invoice" | "receipt" | null {
+  if (message.includes("ออกใบเสนอราคา")) {
+    return "quotation";
+  }
+
+  if (message.includes("ออกใบแจ้งหนี้")) {
+    return "invoice";
+  }
+
+  if (message.includes("ออกใบเสร็จ")) {
+    return "receipt";
+  }
+
+  return null;
+}
+
+export function parseChatCommand(message: string): ParsedDocumentCommand {
+  const documentType = detectDocumentType(message);
+  if (!documentType) {
     return {
       kind: "unsupported",
-      reason: "ตอนนี้ MVP รองรับเฉพาะคำสั่งออกใบเสนอราคา"
+      reason: "ตอนนี้ MVP รองรับคำสั่งออกใบเสนอราคา, ใบแจ้งหนี้, และใบเสร็จรับเงิน"
     };
   }
 
   const contactMatch = message.match(/ลูกค้า=([^\n]+?)(?=\s+\S+=|$)/);
   const dateMatch = message.match(/วันที่=([0-9]{4}-[0-9]{2}-[0-9]{2})/);
+  const dueDateMatch = message.match(/ครบกำหนด=([0-9]{4}-[0-9]{2}-[0-9]{2})/);
   const itemsMatch = message.match(/รายการ=([^\n]+)$/);
 
   if (!contactMatch || !dateMatch || !itemsMatch) {
     return {
       kind: "unsupported",
       reason: "กรุณาระบุ ลูกค้า=..., วันที่=YYYY-MM-DD และ รายการ=ชื่อสินค้า,จำนวน,ราคา"
+    };
+  }
+
+  if ((documentType === "invoice" || documentType === "receipt") && !dueDateMatch) {
+    return {
+      kind: "unsupported",
+      reason: "ใบแจ้งหนี้และใบเสร็จต้องระบุ ครบกำหนด=YYYY-MM-DD"
     };
   }
 
@@ -83,9 +110,11 @@ export function parseChatCommand(message: string): ParsedQuotationCommand {
   }
 
   return {
-    kind: "create_quotation",
+    kind: "create_document",
+    documentType,
     contactName: contactMatch[1].trim(),
     issuedDate: dateMatch[1],
+    dueDate: dueDateMatch?.[1],
     items
   };
 }

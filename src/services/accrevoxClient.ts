@@ -10,7 +10,14 @@ export type ProductSearchResult = {
   name: string;
 };
 
-export type QuotationPayload = {
+export type DocumentItemPayload = {
+  productId: string;
+  quantity: number;
+  unitPrice: number;
+  description?: string;
+};
+
+export type BaseDocumentPayload = {
   issuedDate: string;
   branchCode: string;
   contactId: string;
@@ -18,12 +25,19 @@ export type QuotationPayload = {
   priceMethod: string;
   approvalPerson?: string;
   createdPerson?: string;
-  items: Array<{
-    productId: string;
-    quantity: number;
-    unitPrice: number;
-    description?: string;
-  }>;
+  items: DocumentItemPayload[];
+};
+
+export type QuotationPayload = BaseDocumentPayload;
+
+export type InvoicePayload = BaseDocumentPayload & {
+  headerType: "INVOICE" | "INVOICE_SEND_PRODUCT" | "INVOICE_SEND_PRODUCT_TAX_INVOICE";
+  dueDate: string;
+};
+
+export type ReceiptPayload = BaseDocumentPayload & {
+  headerType: "RECEIPT" | "RECEIPT_TAX_INVOICE";
+  dueDate: string;
 };
 
 export type CompanyResult = {
@@ -142,8 +156,23 @@ export class AccrevoxClient {
   }
 
   async createQuotation(payload: QuotationPayload): Promise<CreateDocumentResponse> {
+    return this.createDocument("/api/v1/quotations", payload);
+  }
+
+  async createInvoice(payload: InvoicePayload): Promise<CreateDocumentResponse> {
+    return this.createDocument("/api/v1/invoices", payload);
+  }
+
+  async createReceipt(payload: ReceiptPayload): Promise<CreateDocumentResponse> {
+    return this.createDocument("/api/v1/receipts", payload);
+  }
+
+  private async createDocument(
+    path: string,
+    payload: QuotationPayload | InvoicePayload | ReceiptPayload
+  ): Promise<CreateDocumentResponse> {
     const headers = await this.authHeaders();
-    const { data } = await this.http.post<CreateDocumentResponse>("/api/v1/quotations", payload, {
+    const { data } = await this.http.post<CreateDocumentResponse>(path, payload, {
       headers: {
         ...headers,
         "Content-Type": "application/json"

@@ -1,15 +1,18 @@
 import {
   AccrevoxClient,
+  BaseDocumentPayload,
   CreateDocumentResponse,
   DocumentJobStatus,
+  InvoicePayload,
   ProductSearchResult,
-  QuotationPayload
+  QuotationPayload,
+  ReceiptPayload
 } from "./accrevoxClient.js";
 import { DocumentType, Prisma } from "@prisma/client";
 import { AiAccessPolicy } from "./aiAccessPolicy.js";
 import { CreditLedger } from "./creditLedger.js";
 import { DocumentRequestPrismaRepository } from "../repositories/documentRequestPrismaRepository.js";
-import { parseChatCommand } from "./intentParser.js";
+import { ParsedDocumentCommand, parseChatCommand } from "./intentParser.js";
 import { TenantConfig } from "../types/tenant.js";
 
 function sleep(ms: number): Promise<void> {
@@ -65,6 +68,55 @@ async function pollUntilDone(
   throw new Error(`เอกสารถูกสร้างอยู่ในระบบแล้ว แต่ยังไม่เสร็จภายใน ${maxAttempts * delayMs / 1000} วินาที`);
 }
 
+function toPrismaDocumentType(
+  documentType: Extract<ParsedDocumentCommand, { kind: "create_document" }>["documentType"]
+): DocumentType {
+  switch (documentType) {
+    case "quotation":
+      return DocumentType.quotation;
+    case "invoice":
+      return DocumentType.invoice;
+    case "receipt":
+      return DocumentType.receipt;
+  }
+}
+
+function getDocumentLabel(
+  documentType: Extract<ParsedDocumentCommand, { kind: "create_document" }>["documentType"]
+): string {
+  switch (documentType) {
+    case "quotation":
+      return "ใบเสนอราคา";
+    case "invoice":
+      return "ใบแจ้งหนี้";
+    case "receipt":
+      return "ใบเสร็จรับเงิน";
+  }
+}
+
+function buildBasePayload(
+  tenant: TenantConfig,
+  contactId: string,
+  parsed: Extract<ParsedDocumentCommand, { kind: "create_document" }>,
+  products: Map<string, ProductSearchResult>
+): BaseDocumentPayload {
+  return {
+    issuedDate: parsed.issuedDate,
+    branchCode: tenant.defaults.branchCode,
+    contactId,
+    vatMethod: tenant.defaults.vatMethod,
+    priceMethod: tenant.defaults.priceMethod,
+    approvalPerson: tenant.defaults.approvalPerson || undefined,
+    createdPerson: tenant.defaults.createdPerson || undefined,
+    items: parsed.items.map((item) => ({
+      productId: products.get(item.productName)!.id,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      description: item.productName
+    }))
+  };
+}
+
 export class DocumentOrchestrator {
   constructor(
     private readonly client: AccrevoxClient,
@@ -75,16 +127,15 @@ export class DocumentOrchestrator {
   ) {}
 
   async handleChatMessage(message: string, lineUserId?: string): Promise<string> {
+    const parsed = parseChatCommand(message);
     const documentRequest = await this.documentRequestRepository.createReceivedRequest({
       tenantId: this.tenant.id,
       lineUserId,
       sourceText: message,
-      documentType: DocumentType.quotation
+      documentType: parsed.kind === "create_document" ? toPrismaDocumentType(parsed.documentType) : DocumentType.quotation
     });
 
     try {
-      const parsed = parseChatCommand(message);
-
       if (parsed.kind === "unsupported") {
         const aiDecision = await this.aiAccessPolicy.evaluateIntentParsing(this.tenant);
         const aiHint = aiDecision.allowed
@@ -102,13 +153,17 @@ export class DocumentOrchestrator {
           aiHint,
           "",
           "ตัวอย่าง:",
-          "ออกใบเสนอราคา ลูกค้า=บริษัท ABC วันที่=2026-05-03 รายการ=ปากกา,10,20;สมุด,5,50"
+          "ออกใบเสนอราคา ลูกค้า=บริษัท ABC วันที่=2026-05-03 รายการ=ปากกา,10,20;สมุด,5,50",
+          "ออกใบแจ้งหนี้ ลูกค้า=บริษัท ABC วันที่=2026-05-03 ครบกำหนด=2026-05-10 รายการ=ปากกา,10,20",
+          "ออกใบเสร็จ ลูกค้า=บริษัท ABC วันที่=2026-05-03 ครบกำหนด=2026-05-03 รายการ=ปากกา,10,20"
         ].join("\n");
       }
 
       const parsedPayloadJson: Prisma.InputJsonValue = {
+        documentType: parsed.documentType,
         contactName: parsed.contactName,
         issuedDate: parsed.issuedDate,
+        dueDate: parsed.dueDate ?? null,
         items: parsed.items
       };
       await this.documentRequestRepository.markAsValidating(documentRequest.id, parsedPayloadJson);
@@ -116,24 +171,9 @@ export class DocumentOrchestrator {
       const contacts = await this.client.searchContacts(parsed.contactName);
       const contact = await requireSingleMatch(contacts, "ลูกค้า", parsed.contactName);
       const products = await mapProducts(this.client, parsed.items.map((item) => item.productName));
+      const basePayload = buildBasePayload(this.tenant, contact.id, parsed, products);
+      const { created, payload } = await this.createDocument(parsed, basePayload);
 
-      const payload: QuotationPayload = {
-        issuedDate: parsed.issuedDate,
-        branchCode: this.tenant.defaults.branchCode,
-        contactId: contact.id,
-        vatMethod: this.tenant.defaults.vatMethod,
-        priceMethod: this.tenant.defaults.priceMethod,
-        approvalPerson: this.tenant.defaults.approvalPerson || undefined,
-        createdPerson: this.tenant.defaults.createdPerson || undefined,
-        items: parsed.items.map((item) => ({
-          productId: products.get(item.productName)!.id,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          description: item.productName
-        }))
-      };
-
-      const created = await this.client.createQuotation(payload);
       await this.documentRequestRepository.markAsSubmitted(
         documentRequest.id,
         created.trackingId,
@@ -141,7 +181,12 @@ export class DocumentOrchestrator {
         payload as Prisma.InputJsonValue
       );
 
-      return this.buildFinalMessage(documentRequest.id, created, payload as Prisma.InputJsonValue);
+      return this.buildFinalMessage(
+        documentRequest.id,
+        parsed.documentType,
+        created,
+        payload as Prisma.InputJsonValue
+      );
     } catch (error) {
       const messageText = error instanceof Error ? error.message : "Unknown document orchestration error";
       await this.documentRequestRepository.markAsFailed({
@@ -152,8 +197,49 @@ export class DocumentOrchestrator {
     }
   }
 
+  private async createDocument(
+    parsed: Extract<ParsedDocumentCommand, { kind: "create_document" }>,
+    basePayload: BaseDocumentPayload
+  ): Promise<{
+    created: CreateDocumentResponse;
+    payload: QuotationPayload | InvoicePayload | ReceiptPayload;
+  }> {
+    switch (parsed.documentType) {
+      case "quotation": {
+        const payload: QuotationPayload = basePayload;
+        return {
+          created: await this.client.createQuotation(payload),
+          payload
+        };
+      }
+      case "invoice": {
+        const payload: InvoicePayload = {
+          ...basePayload,
+          headerType: "INVOICE",
+          dueDate: parsed.dueDate!
+        };
+        return {
+          created: await this.client.createInvoice(payload),
+          payload
+        };
+      }
+      case "receipt": {
+        const payload: ReceiptPayload = {
+          ...basePayload,
+          headerType: "RECEIPT",
+          dueDate: parsed.dueDate!
+        };
+        return {
+          created: await this.client.createReceipt(payload),
+          payload
+        };
+      }
+    }
+  }
+
   private async buildFinalMessage(
     documentRequestId: string,
+    documentType: Extract<ParsedDocumentCommand, { kind: "create_document" }>["documentType"],
     created: CreateDocumentResponse,
     parsedPayloadJson?: Prisma.InputJsonValue
   ): Promise<string> {
@@ -171,7 +257,7 @@ export class DocumentOrchestrator {
       );
 
       return [
-        `สร้างเอกสารไม่สำเร็จ`,
+        `สร้าง${getDocumentLabel(documentType)}ไม่สำเร็จ`,
         `เลขเอกสาร: ${created.documentNumber}`,
         errorText || job.message
       ].join("\n");
@@ -189,7 +275,7 @@ export class DocumentOrchestrator {
     });
 
     return [
-      `สร้างใบเสนอราคาสำเร็จ`,
+      `สร้าง${getDocumentLabel(documentType)}สำเร็จ`,
       `เลขเอกสาร: ${created.documentNumber}`,
       `trackingId: ${created.trackingId}`,
       job.result?.pdfUrl ? `PDF: ${job.result.pdfUrl}` : "PDF: ยังไม่พบ pdfUrl ในผลลัพธ์ job"

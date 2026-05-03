@@ -4,10 +4,10 @@ MVP นี้เป็น backend ตัวกลางระหว่าง `LI
 
 ## ขอบเขตของ MVP
 
-- รองรับ `ใบเสนอราคา` ก่อนเป็นลำดับแรก
+- รองรับ `ใบเสนอราคา`, `ใบแจ้งหนี้` และ `ใบเสร็จรับเงิน`
 - ใช้รูปแบบคำสั่งแบบกึ่งโครงสร้าง เพื่อลดความคลุมเครือ
 - ค้นหา `contactId` และ `productId` จากชื่อก่อนยิง API
-- สร้างเอกสารผ่าน `POST /api/v1/quotations`
+- สร้างเอกสารผ่าน `POST /api/v1/quotations`, `POST /api/v1/invoices`, และ `POST /api/v1/receipts`
 - poll `GET /api/v1/documents/jobs/{trackingId}` จน job เสร็จ
 - ตอบกลับใน LINE ด้วยเลขเอกสาร สถานะ และลิงก์ PDF เมื่อมีข้อมูลพร้อม
 - รองรับแนวทางธุรกิจแบบ `แพ็กเกจหลัก + AI Add-on + เครดิต`
@@ -33,6 +33,8 @@ MVP นี้เป็น backend ตัวกลางระหว่าง `LI
 - contacts: `GET /api/v1/contacts`
 - products: `GET /api/v1/products`
 - quotations: `POST /api/v1/quotations`
+- invoices: `POST /api/v1/invoices`
+- receipts: `POST /api/v1/receipts`
 - async job status: `GET /api/v1/documents/jobs/{trackingId}`
 
 หมายเหตุ:
@@ -46,12 +48,15 @@ MVP นี้เป็น backend ตัวกลางระหว่าง `LI
 
 ```text
 ออกใบเสนอราคา ลูกค้า=บริษัท ABC วันที่=2026-05-03 รายการ=ปากกา,10,20;สมุด,5,50
+ออกใบแจ้งหนี้ ลูกค้า=บริษัท ABC วันที่=2026-05-03 ครบกำหนด=2026-05-10 รายการ=ปากกา,10,20
+ออกใบเสร็จ ลูกค้า=บริษัท ABC วันที่=2026-05-03 ครบกำหนด=2026-05-03 รายการ=ปากกา,10,20
 ```
 
 กติกา:
 
 - `ลูกค้า=` ใช้ชื่อสำหรับค้นหา contact
 - `วันที่=` ใช้รูปแบบ `YYYY-MM-DD`
+- `ครบกำหนด=` ใช้รูปแบบ `YYYY-MM-DD` สำหรับ `ใบแจ้งหนี้` และ `ใบเสร็จรับเงิน`
 - `รายการ=` แยกหลายรายการด้วย `;`
 - แต่ละรายการใช้รูปแบบ `ชื่อสินค้า,จำนวน,ราคาต่อหน่วย`
 
@@ -60,7 +65,7 @@ MVP นี้เป็น backend ตัวกลางระหว่าง `LI
 1. LINE ส่ง webhook event เข้ามาที่ backend
 2. backend parse ข้อความเป็น intent และข้อมูลเอกสาร
 3. backend ค้นหา contact และ product ใน Accrevox
-4. backend สร้าง quotation
+4. backend สร้างเอกสารตามชนิดที่สั่ง
 5. backend poll job status
 6. backend ส่งข้อความกลับ LINE
 
