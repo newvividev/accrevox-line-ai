@@ -2,6 +2,19 @@ import { LineUserStateType } from "@prisma/client";
 import { prisma } from "../db.js";
 
 export class LineUserConnectionPrismaRepository {
+  async getActiveConnectionByTenantAndUser(tenantId: string, lineUserId: string) {
+    return prisma.lineUserConnection.findFirst({
+      where: {
+        tenantId,
+        lineUserId,
+        isActive: true
+      },
+      orderBy: {
+        updatedAt: "desc"
+      }
+    });
+  }
+
   async listConnectionsByTenantId(tenantId: string, limit = 50) {
     return prisma.lineUserConnection.findMany({
       where: {

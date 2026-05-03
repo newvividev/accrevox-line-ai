@@ -82,6 +82,45 @@ async function formatProductsReply(searchClient: AccrevoxClient, searchText: str
   ].join("\n");
 }
 
+function buildHelpMessage(): string {
+  return [
+    "ตอนนี้ฉันช่วยได้ประมาณนี้",
+    "1. เชื่อมต่อ Accrevox",
+    "2. ดูบริษัท",
+    "3. ดูสถานะการเชื่อมต่อ",
+    "4. ดูลูกค้า",
+    "5. ดูสินค้า",
+    "6. ดูคำขอล่าสุด",
+    "7. ออกใบเสนอราคาแบบคำสั่งตายตัว",
+    "",
+    "ตัวอย่างคำสั่ง",
+    "เชื่อมต่อ Accrevox",
+    "ดูบริษัท",
+    "ดูลูกค้า",
+    "ดูสินค้า ปากกา",
+    "มีสินค้าอะไรบ้าง",
+    "ดูคำขอล่าสุด",
+    "ออกใบเสนอราคา ลูกค้า=บริษัท ABC วันที่=2026-05-03 รายการ=ปากกา,10,20",
+    "ออกใบเสนอราคา ลูกค้า=บริษัท ABC วันที่=2026-05-03 รายการ=ปากกา 10 20"
+  ].join("\n");
+}
+
+function formatRecentRequestsReply(items: Awaited<ReturnType<DocumentRequestPrismaRepository["listByTenantIdAndLineUserId"]>>): string {
+  if (items.length === 0) {
+    return "ยังไม่มีคำขอเอกสารล่าสุด";
+  }
+
+  const lines = items.slice(0, 5).map((item, index) => {
+    const docNo = item.documentNumber ? ` เลขที่ ${item.documentNumber}` : "";
+    return `${index + 1}. ${item.documentType} - ${item.status}${docNo}`;
+  });
+
+  return [
+    "คำขอล่าสุดของคุณ",
+    ...lines
+  ].join("\n");
+}
+
 async function handleEvent(event: WebhookEvent, tenantCode: string): Promise<void> {
   const tenant = await tenantRepository.findByCode(tenantCode);
   if (!tenant) {
@@ -152,6 +191,39 @@ async function handleTextMessage(
     return "กรุณาส่ง Company API Key ของ Accrevox เพื่อเชื่อมต่อ";
   }
 
+  if (
+    normalizedText === "ดูบริษัท" ||
+    normalizedText === "ข้อมูลบริษัท" ||
+    normalizedText === "บริษัทอะไร" ||
+    normalizedText === "เชื่อมต่อบริษัทอะไรอยู่"
+  ) {
+    const company = await searchClient.getCompany();
+    return [
+      `บริษัท: ${company.name}`,
+      company.taxIdent ? `เลขภาษี: ${company.taxIdent}` : null,
+      company.ownerName ? `เจ้าของ: ${company.ownerName}` : null,
+      company.telephone ? `โทร: ${company.telephone}` : null,
+      company.email ? `อีเมล: ${company.email}` : null
+    ].filter(Boolean).join("\n");
+  }
+
+  if (
+    normalizedText === "ดูสถานะการเชื่อมต่อ" ||
+    normalizedText === "สถานะการเชื่อมต่อ" ||
+    normalizedText === "เชื่อมต่ออยู่ไหม"
+  ) {
+    const activeConnection = await lineUserConnectionRepository.getActiveConnectionByTenantAndUser(tenant.id, lineUserId);
+    if (!activeConnection) {
+      return "ยังไม่มีการเชื่อมต่อ Accrevox สำหรับผู้ใช้นี้\nพิมพ์ เชื่อมต่อ Accrevox เพื่อเริ่มต้น";
+    }
+
+    return [
+      "สถานะการเชื่อมต่อ: เชื่อมต่อแล้ว",
+      activeConnection.companyName ? `บริษัท: ${activeConnection.companyName}` : null,
+      activeConnection.lastValidatedAt ? `ตรวจสอบล่าสุด: ${activeConnection.lastValidatedAt.toISOString()}` : null
+    ].filter(Boolean).join("\n");
+  }
+
   const customerPatterns = [
     /^ดูลูกค้า(?:\s+(.*))?$/i,
     /^มีลูกค้าอะไรบ้าง$/i,
@@ -180,19 +252,22 @@ async function handleTextMessage(
     return formatProductsReply(searchClient, searchText);
   }
 
-  if (loweredText === "ช่วยอะไรได้บ้าง" || loweredText === "คุณทำอะไรได้บ้าง") {
-    return [
-      "ตอนนี้ฉันช่วยได้ประมาณนี้",
-      "1. เชื่อมต่อ Accrevox",
-      "2. ดูลูกค้า",
-      "3. ดูสินค้า",
-      "4. ออกใบเสนอราคาแบบคำสั่งตายตัว",
-      "",
-      "ตัวอย่าง:",
-      "ออกใบเสนอราคา ลูกค้า=บริษัท ABC วันที่=2026-05-03 รายการ=ปากกา,10,20",
-      "หรือ",
-      "ออกใบเสนอราคา ลูกค้า=บริษัท ABC วันที่=2026-05-03 รายการ=ปากกา 10 20"
-    ].join("\n");
+  if (
+    loweredText === "ช่วยอะไรได้บ้าง" ||
+    loweredText === "คุณทำอะไรได้บ้าง" ||
+    normalizedText === "เมนู" ||
+    normalizedText === "help"
+  ) {
+    return buildHelpMessage();
+  }
+
+  if (
+    normalizedText === "ดูคำขอล่าสุด" ||
+    normalizedText === "ดูเอกสารล่าสุด" ||
+    normalizedText === "ดูสถานะล่าสุด"
+  ) {
+    const items = await documentRequestRepository.listByTenantIdAndLineUserId(tenant.id, lineUserId, 5);
+    return formatRecentRequestsReply(items);
   }
 
   const userState = await lineUserConnectionRepository.getState(tenant.id, lineUserId);
