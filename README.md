@@ -223,6 +223,19 @@ curl -X POST http://localhost:3000/admin/tenants/demo/wallet/topup \
 - รอบนี้เป็น MVP จึงยังเก็บ key ใน `AccrevoxConnection` โดยตรง
 - ก่อน production ควรเพิ่มการเข้ารหัส secret และสิทธิ์การเข้าถึงฝั่ง admin
 
+## คำสั่งช่วยใน LINE
+
+ตอนนี้รองรับคำสั่งช่วยค้นหาข้อมูลจาก Accrevox แล้ว:
+
+```text
+ดูลูกค้า
+ดูลูกค้า บริษัท
+ดูสินค้า
+ดูสินค้า ปากกา
+```
+
+คำสั่งเหล่านี้จะดึงข้อมูลจริงจาก Accrevox แล้วสรุปผลกลับในแชต เพื่อช่วยให้ผู้ใช้ใช้ชื่อลูกค้าและสินค้าที่ถูกต้องตอนสั่งออกเอกสาร
+
 ## Repository Layer ที่มีในรอบนี้
 
 - Prisma-backed tenant repository สำหรับโหลด config ต่อ tenant จากฐานข้อมูล

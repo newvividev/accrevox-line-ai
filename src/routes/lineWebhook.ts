@@ -119,10 +119,50 @@ async function handleTextMessage(
   orchestrator: DocumentOrchestrator
 ): Promise<string> {
   const normalizedText = messageText.trim();
+  const searchClient = new AccrevoxClient(
+    tenant.accrevox.baseUrl,
+    tenant.accrevox.clientId,
+    tenant.accrevox.clientSecret,
+    tenant.accrevox.companyApiKey
+  );
 
   if (normalizedText === "เชื่อมต่อ Accrevox" || normalizedText === "เชื่อมต่อ accrevox") {
     await lineUserConnectionRepository.setAwaitingApiKey(tenant.id, lineUserId);
     return "กรุณาส่ง Company API Key ของ Accrevox เพื่อเชื่อมต่อ";
+  }
+
+  if (normalizedText === "ดูลูกค้า" || normalizedText.startsWith("ดูลูกค้า ")) {
+    const searchText = normalizedText === "ดูลูกค้า" ? "" : normalizedText.replace(/^ดูลูกค้า\s+/, "").trim();
+    const contacts = await searchClient.searchContacts(searchText);
+
+    if (contacts.length === 0) {
+      return searchText
+        ? `ไม่พบลูกค้าที่ค้นหา: ${searchText}`
+        : "ไม่พบข้อมูลลูกค้า";
+    }
+
+    const lines = contacts.slice(0, 10).map((contact, index) => `${index + 1}. ${contact.name}`);
+    return [
+      searchText ? `ผลการค้นหาลูกค้า: ${searchText}` : "รายการลูกค้า",
+      ...lines
+    ].join("\n");
+  }
+
+  if (normalizedText === "ดูสินค้า" || normalizedText.startsWith("ดูสินค้า ")) {
+    const searchText = normalizedText === "ดูสินค้า" ? "" : normalizedText.replace(/^ดูสินค้า\s+/, "").trim();
+    const products = await searchClient.searchProducts(searchText);
+
+    if (products.length === 0) {
+      return searchText
+        ? `ไม่พบสินค้าที่ค้นหา: ${searchText}`
+        : "ไม่พบข้อมูลสินค้า";
+    }
+
+    const lines = products.slice(0, 10).map((product, index) => `${index + 1}. ${product.name}`);
+    return [
+      searchText ? `ผลการค้นหาสินค้า: ${searchText}` : "รายการสินค้า",
+      ...lines
+    ].join("\n");
   }
 
   const userState = await lineUserConnectionRepository.getState(tenant.id, lineUserId);
