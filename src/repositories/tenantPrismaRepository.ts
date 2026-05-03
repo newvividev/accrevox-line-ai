@@ -55,6 +55,36 @@ export class TenantPrismaRepository {
     };
   }
 
+  async getAdminSummaryByCode(code: string) {
+    return prisma.tenant.findUnique({
+      where: { code },
+      include: {
+        aiSubscription: true,
+        creditWallet: true,
+        lineChannels: {
+          where: { isActive: true },
+          select: {
+            id: true,
+            channelId: true,
+            isActive: true,
+            createdAt: true,
+            updatedAt: true
+          },
+          orderBy: { createdAt: "desc" }
+        },
+        accrevoxConnection: {
+          select: {
+            id: true,
+            baseUrl: true,
+            isActive: true,
+            createdAt: true,
+            updatedAt: true
+          }
+        }
+      }
+    });
+  }
+
   private mapAiMode(mode: string | undefined): TenantConfig["aiMode"] {
     if (!mode) {
       return "disabled";

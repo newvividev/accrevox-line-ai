@@ -78,6 +78,7 @@ src/
     creditWalletPrismaRepository.ts
     tenantPrismaRepository.ts
   routes/
+    adminRouter.ts
     lineWebhook.ts
   services/
     accrevoxClient.ts
@@ -139,6 +140,31 @@ PostgreSQL จะพร้อมที่:
 - `https://your-domain.com/webhooks/line/demo`
 
 แนวทางนี้เหมาะกับตอนเริ่มต้น เพราะแยก tenant ได้ชัดเจนโดยไม่ต้องพึ่ง database ก่อน ใน production ค่อยขยับไป map tenant จาก channel หรือ database ได้
+
+## Admin API เบื้องต้น
+
+ตอนนี้มี endpoint สำหรับเดโมและจัดการเครดิตเบื้องต้นแล้ว:
+
+```text
+GET  /admin/tenants/:tenantCode
+GET  /admin/tenants/:tenantCode/wallet
+POST /admin/tenants/:tenantCode/wallet/topup
+GET  /admin/tenants/:tenantCode/wallet/transactions?limit=20
+```
+
+ตัวอย่าง top-up:
+
+```bash
+curl -X POST http://localhost:3000/admin/tenants/demo/wallet/topup \
+  -H "Content-Type: application/json" \
+  -d "{\"amount\":500,\"reason\":\"Initial sales demo credit\"}"
+```
+
+หมายเหตุ:
+
+- รอบนี้ยังไม่มี auth/admin permission
+- เหมาะสำหรับ local development และเดโมเท่านั้น
+- ก่อนขึ้น production ควรเพิ่ม authentication, audit actor และ rate limit
 
 ระหว่างพัฒนาในเครื่อง แนะนำเปิดผ่าน tunnel เช่น ngrok หรือ Cloudflare Tunnel แล้วนำ URL ไปใส่ใน LINE Developers Console
 
