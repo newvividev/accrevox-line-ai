@@ -205,6 +205,22 @@ curl -X POST http://localhost:3000/admin/tenants/demo/wallet/topup \
 - job ไหนล้มเหลว
 - ได้เลขเอกสารและ PDF กลับมาหรือไม่
 
+## Flow เชื่อมต่อ Accrevox ผ่าน LINE
+
+ตอนนี้รองรับ flow เริ่มต้นแบบนี้แล้ว:
+
+1. ผู้ใช้พิมพ์ `เชื่อมต่อ Accrevox`
+2. บอทตอบกลับให้ส่ง `Company API Key`
+3. ผู้ใช้ส่ง key
+4. ระบบเรียก `GET /api/v1/companies` เพื่อตรวจสอบ key
+5. ถ้าสำเร็จ ระบบจะผูก LINE user กับ tenant/company และอัปเดต `companyApiKey` ของ tenant
+
+หมายเหตุ:
+
+- พิมพ์ `ยกเลิก` ได้ระหว่างที่ระบบกำลังรอ API key
+- รอบนี้เป็น MVP จึงยังเก็บ key ใน `AccrevoxConnection` โดยตรง
+- ก่อน production ควรเพิ่มการเข้ารหัส secret และสิทธิ์การเข้าถึงฝั่ง admin
+
 ## Repository Layer ที่มีในรอบนี้
 
 - Prisma-backed tenant repository สำหรับโหลด config ต่อ tenant จากฐานข้อมูล

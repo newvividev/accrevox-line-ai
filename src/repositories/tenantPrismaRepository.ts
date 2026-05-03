@@ -72,6 +72,18 @@ export class TenantPrismaRepository {
           },
           orderBy: { createdAt: "desc" }
         },
+        lineUserConnections: {
+          where: { isActive: true },
+          select: {
+            id: true,
+            lineUserId: true,
+            companyId: true,
+            companyName: true,
+            connectedAt: true,
+            lastValidatedAt: true
+          },
+          orderBy: { updatedAt: "desc" }
+        },
         accrevoxConnection: {
           select: {
             id: true,
@@ -81,6 +93,16 @@ export class TenantPrismaRepository {
             updatedAt: true
           }
         }
+      }
+    });
+  }
+
+  async updateCompanyApiKey(tenantId: string, companyApiKey: string) {
+    return prisma.accrevoxConnection.update({
+      where: { tenantId },
+      data: {
+        companyApiKey,
+        updatedAt: new Date()
       }
     });
   }

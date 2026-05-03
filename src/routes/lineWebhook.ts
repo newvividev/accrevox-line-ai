@@ -6,11 +6,13 @@ import { CreditLedger } from "../services/creditLedger.js";
 import { DocumentOrchestrator } from "../services/documentOrchestrator.js";
 import { CreditWalletPrismaRepository } from "../repositories/creditWalletPrismaRepository.js";
 import { DocumentRequestPrismaRepository } from "../repositories/documentRequestPrismaRepository.js";
+import { LineUserConnectionPrismaRepository } from "../repositories/lineUserConnectionPrismaRepository.js";
 import { TenantPrismaRepository } from "../repositories/tenantPrismaRepository.js";
 
 const tenantRepository = new TenantPrismaRepository();
 const creditLedger = new CreditLedger(new CreditWalletPrismaRepository());
 const documentRequestRepository = new DocumentRequestPrismaRepository();
+const lineUserConnectionRepository = new LineUserConnectionPrismaRepository();
 
 function createMiddlewareConfig(channelSecret: string, channelAccessToken: string): MiddlewareConfig {
   return {
@@ -51,7 +53,10 @@ async function handleEvent(event: WebhookEvent, tenantId: string): Promise<void>
 
   try {
     const lineUserId = event.source.type === "user" ? event.source.userId : undefined;
-    const replyText = await orchestrator.handleChatMessage(event.message.text, lineUserId);
+    const replyText = lineUserId
+      ? await handleTextMessage(event.message.text, lineUserId, tenant, orchestrator)
+      : await orchestrator.handleChatMessage(event.message.text, lineUserId);
+
     await lineClient.replyMessage({
       replyToken: event.replyToken,
       messages: [
@@ -73,6 +78,48 @@ async function handleEvent(event: WebhookEvent, tenantId: string): Promise<void>
       ]
     });
   }
+}
+
+async function handleTextMessage(
+  messageText: string,
+  lineUserId: string,
+  tenant: NonNullable<Awaited<ReturnType<TenantPrismaRepository["findByCode"]>>>,
+  orchestrator: DocumentOrchestrator
+): Promise<string> {
+  const normalizedText = messageText.trim();
+
+  if (normalizedText === "เชื่อมต่อ Accrevox") {
+    await lineUserConnectionRepository.setAwaitingApiKey(tenant.id, lineUserId);
+    return "กรุณาส่ง Company API Key ของ Accrevox เพื่อเชื่อมต่อ";
+  }
+
+  const userState = await lineUserConnectionRepository.getState(tenant.id, lineUserId);
+  if (userState?.state === "awaiting_api_key") {
+    if (normalizedText === "ยกเลิก") {
+      await lineUserConnectionRepository.clearState(tenant.id, lineUserId);
+      return "ยกเลิกการเชื่อมต่อ Accrevox แล้ว";
+    }
+
+    const validationClient = new AccrevoxClient(
+      tenant.accrevox.baseUrl,
+      tenant.accrevox.clientId,
+      tenant.accrevox.clientSecret,
+      normalizedText
+    );
+
+    try {
+      const company = await validationClient.getCompany();
+      await tenantRepository.updateCompanyApiKey(tenant.id, normalizedText);
+      await lineUserConnectionRepository.upsertConnection(tenant.id, lineUserId, company.id, company.name);
+      await lineUserConnectionRepository.clearState(tenant.id, lineUserId);
+
+      return `เชื่อมต่อ Accrevox สำเร็จ\nบริษัท: ${company.name}`;
+    } catch {
+      return "API Key ไม่ถูกต้อง หรือไม่สามารถเชื่อมต่อกับ Accrevox ได้\nกรุณาส่ง Company API Key ใหม่ หรือพิมพ์ ยกเลิก";
+    }
+  }
+
+  return orchestrator.handleChatMessage(messageText, lineUserId);
 }
 
 export function createLineWebhookRouter(): Router {

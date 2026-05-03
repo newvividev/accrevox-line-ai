@@ -53,6 +53,11 @@ enum CreditTransactionType {
   adjustment
 }
 
+enum LineUserStateType {
+  idle
+  awaiting_api_key
+}
+
 model Tenant {
   id                 String               @id @default(cuid())
   code               String               @unique
@@ -67,6 +72,8 @@ model Tenant {
   creditWallet       CreditWallet?
   chatSessions       ChatSession[]
   documentRequests   DocumentRequest[]
+  lineUserStates     LineUserState[]
+  lineUserConnections LineUserConnection[]
 }
 
 model LineChannel {
@@ -145,6 +152,36 @@ model ChatSession {
   tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, lineUserId, status])
+}
+
+model LineUserState {
+  id         String            @id @default(cuid())
+  tenantId   String
+  lineUserId String
+  state      LineUserStateType @default(idle)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, lineUserId])
+  @@index([tenantId, state])
+}
+
+model LineUserConnection {
+  id              String   @id @default(cuid())
+  tenantId        String
+  lineUserId      String
+  companyId       String?
+  companyName     String?
+  connectedAt     DateTime @default(now())
+  lastValidatedAt DateTime @default(now())
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, lineUserId])
+  @@index([tenantId, isActive])
 }
 
 model DocumentRequest {

@@ -47,6 +47,7 @@ export function createAdminRouter(): Router {
           }
         : null,
       lineChannels: tenant.lineChannels,
+      lineUserConnections: tenant.lineUserConnections,
       accrevoxConnection: tenant.accrevoxConnection
     });
   }));

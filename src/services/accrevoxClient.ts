@@ -26,6 +26,15 @@ export type QuotationPayload = {
   }>;
 };
 
+export type CompanyResult = {
+  id: string;
+  name: string;
+  taxIdent?: string;
+  ownerName?: string;
+  email?: string;
+  telephone?: string;
+};
+
 export type CreateDocumentResponse = {
   message: string;
   trackingId: string;
@@ -107,6 +116,15 @@ export class AccrevoxClient {
     });
 
     return data.data ?? [];
+  }
+
+  async getCompany(): Promise<CompanyResult> {
+    const headers = await this.authHeaders();
+    const { data } = await this.http.get<CompanyResult>("/api/v1/companies", {
+      headers
+    });
+
+    return data;
   }
 
   async searchProducts(search: string): Promise<ProductSearchResult[]> {
