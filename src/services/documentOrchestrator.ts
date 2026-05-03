@@ -13,6 +13,7 @@ import { AiAccessPolicy } from "./aiAccessPolicy.js";
 import { CreditLedger } from "./creditLedger.js";
 import { DocumentRequestPrismaRepository } from "../repositories/documentRequestPrismaRepository.js";
 import { ParsedDocumentCommand, parseChatCommand } from "./intentParser.js";
+import { OpenAiIntentParser } from "./openAiIntentParser.js";
 import { TenantConfig } from "../types/tenant.js";
 
 function sleep(ms: number): Promise<void> {
@@ -118,6 +119,8 @@ function buildBasePayload(
 }
 
 export class DocumentOrchestrator {
+  private readonly aiIntentParser = new OpenAiIntentParser();
+
   constructor(
     private readonly client: AccrevoxClient,
     private readonly tenant: TenantConfig,
@@ -127,7 +130,7 @@ export class DocumentOrchestrator {
   ) {}
 
   async handleChatMessage(message: string, lineUserId?: string): Promise<string> {
-    const parsed = parseChatCommand(message);
+    const parsed = await this.parseMessage(message);
     const documentRequest = await this.documentRequestRepository.createReceivedRequest({
       tenantId: this.tenant.id,
       lineUserId,
@@ -195,6 +198,47 @@ export class DocumentOrchestrator {
       });
       throw error;
     }
+  }
+
+  private async parseMessage(message: string): Promise<ParsedDocumentCommand> {
+    const parsed = parseChatCommand(message);
+    if (parsed.kind === "create_document") {
+      return parsed;
+    }
+
+    const aiDecision = await this.aiAccessPolicy.evaluateIntentParsing(this.tenant);
+    if (!aiDecision.allowed) {
+      return parsed;
+    }
+
+    if (!this.aiIntentParser.isConfigured()) {
+      return {
+        kind: "unsupported",
+        reason: `${parsed.reason}\nAI fallback ยังไม่ได้เปิดใช้งานในระบบ`
+      };
+    }
+
+    let aiParsed: ParsedDocumentCommand;
+    try {
+      aiParsed = await this.aiIntentParser.parse(message);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : "AI fallback failed";
+      return {
+        kind: "unsupported",
+        reason: `${parsed.reason}\nAI fallback ใช้งานไม่สำเร็จ: ${messageText}`
+      };
+    }
+
+    await this.creditLedger.spendCredits(
+      this.tenant,
+      aiDecision.creditsToSpend,
+      `AI intent parsing for "${message.slice(0, 80)}"`
+    );
+
+    return aiParsed.kind === "create_document" ? aiParsed : {
+      kind: "unsupported",
+      reason: aiParsed.reason
+    };
   }
 
   private async createDocument(

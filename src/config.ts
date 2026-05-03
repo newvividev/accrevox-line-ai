@@ -10,6 +10,11 @@ function required(name: string): string {
   return value;
 }
 
+function optional(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value ? value : undefined;
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 3000),
   line: {
@@ -21,6 +26,10 @@ export const config = {
     clientId: required("ACCREVOX_CLIENT_ID"),
     clientSecret: required("ACCREVOX_CLIENT_SECRET"),
     companyApiKey: required("ACCREVOX_COMPANY_API_KEY")
+  },
+  openai: {
+    apiKey: optional("OPENAI_API_KEY"),
+    model: process.env.OPENAI_MODEL?.trim() || "gpt-5-nano"
   },
   defaults: {
     branchCode: process.env.DEFAULT_BRANCH_CODE ?? "00000",
