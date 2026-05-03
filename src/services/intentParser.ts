@@ -22,7 +22,24 @@ function parseItems(rawItems: string): ParsedQuotationItem[] {
     .map((chunk) => chunk.trim())
     .filter(Boolean)
     .map((chunk) => {
-      const [productName, quantityText, unitPriceText] = chunk.split(",").map((value) => value.trim());
+      const csvParts = chunk.split(",").map((value) => value.trim());
+      let productName: string | undefined;
+      let quantityText: string | undefined;
+      let unitPriceText: string | undefined;
+
+      if (csvParts.length >= 3) {
+        [productName, quantityText, unitPriceText] = csvParts;
+      } else {
+        const spacedMatch = chunk.match(
+          /^(.+?)\s+(\d+(?:\.\d+)?)\s+(?:ชิ้น|อัน|แท่ง|ตัว|ชุด|เล่ม|แพ็ก|กล่อง|เครื่อง|ครั้ง|ชั่วโมง|หน้า)?\s*(?:ละ|ราคา)?\s*(\d+(?:\.\d+)?)$/
+        );
+        if (spacedMatch) {
+          productName = spacedMatch[1].trim();
+          quantityText = spacedMatch[2].trim();
+          unitPriceText = spacedMatch[3].trim();
+        }
+      }
+
       const quantity = Number(quantityText);
       const unitPrice = Number(unitPriceText);
 
