@@ -17,6 +17,12 @@ function optional(name: string): string | undefined {
 
 export const config = {
   port: Number(process.env.PORT ?? 3000),
+  ai: {
+    provider: (process.env.AI_PROVIDER?.trim() || "openai") as "openai" | "ollama",
+    openaiModel: process.env.OPENAI_MODEL?.trim() || "gpt-5-nano",
+    ollamaBaseUrl: process.env.OLLAMA_BASE_URL?.trim() || "http://127.0.0.1:11434",
+    ollamaModel: process.env.OLLAMA_MODEL?.trim() || "llama3:latest"
+  },
   line: {
     channelSecret: required("LINE_CHANNEL_SECRET"),
     channelAccessToken: required("LINE_CHANNEL_ACCESS_TOKEN")

@@ -13,6 +13,8 @@ import { AiAccessPolicy } from "./aiAccessPolicy.js";
 import { CreditLedger } from "./creditLedger.js";
 import { DocumentRequestPrismaRepository } from "../repositories/documentRequestPrismaRepository.js";
 import { ParsedDocumentCommand, parseChatCommand } from "./intentParser.js";
+import { config } from "../config.js";
+import { OllamaIntentParser } from "./ollamaIntentParser.js";
 import { OpenAiIntentParser } from "./openAiIntentParser.js";
 import { TenantConfig } from "../types/tenant.js";
 
@@ -119,7 +121,9 @@ function buildBasePayload(
 }
 
 export class DocumentOrchestrator {
-  private readonly aiIntentParser = new OpenAiIntentParser();
+  private readonly aiIntentParser = config.ai.provider === "ollama"
+    ? new OllamaIntentParser()
+    : new OpenAiIntentParser();
 
   constructor(
     private readonly client: AccrevoxClient,
@@ -214,7 +218,7 @@ export class DocumentOrchestrator {
     if (!this.aiIntentParser.isConfigured()) {
       return {
         kind: "unsupported",
-        reason: `${parsed.reason}\nAI fallback ยังไม่ได้เปิดใช้งานในระบบ`
+        reason: `${parsed.reason}\nAI fallback ยังไม่ได้เปิดใช้งานในระบบสำหรับ provider ${config.ai.provider}`
       };
     }
 

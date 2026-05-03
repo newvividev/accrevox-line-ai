@@ -89,7 +89,7 @@ function extractOutputText(response: OpenAiResponse): string {
 
 export class OpenAiIntentParser {
   isConfigured(): boolean {
-    return Boolean(config.openai.apiKey);
+    return config.ai.provider === "openai" && Boolean(config.openai.apiKey);
   }
 
   async parse(message: string, today = new Date()): Promise<ParsedDocumentCommand> {
@@ -108,7 +108,7 @@ export class OpenAiIntentParser {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: config.openai.model,
+        model: config.ai.openaiModel,
         input: [
           {
             role: "system",
