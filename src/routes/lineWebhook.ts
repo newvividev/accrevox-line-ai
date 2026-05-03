@@ -5,10 +5,12 @@ import { AiAccessPolicy } from "../services/aiAccessPolicy.js";
 import { CreditLedger } from "../services/creditLedger.js";
 import { DocumentOrchestrator } from "../services/documentOrchestrator.js";
 import { CreditWalletPrismaRepository } from "../repositories/creditWalletPrismaRepository.js";
+import { DocumentRequestPrismaRepository } from "../repositories/documentRequestPrismaRepository.js";
 import { TenantPrismaRepository } from "../repositories/tenantPrismaRepository.js";
 
 const tenantRepository = new TenantPrismaRepository();
 const creditLedger = new CreditLedger(new CreditWalletPrismaRepository());
+const documentRequestRepository = new DocumentRequestPrismaRepository();
 
 function createMiddlewareConfig(channelSecret: string, channelAccessToken: string): MiddlewareConfig {
   return {
@@ -39,7 +41,8 @@ async function handleEvent(event: WebhookEvent, tenantId: string): Promise<void>
     accrevoxClient,
     tenant,
     aiAccessPolicy,
-    creditLedger
+    creditLedger,
+    documentRequestRepository
   );
 
   if (event.type !== "message" || event.message.type !== "text") {
@@ -47,7 +50,8 @@ async function handleEvent(event: WebhookEvent, tenantId: string): Promise<void>
   }
 
   try {
-    const replyText = await orchestrator.handleChatMessage(event.message.text);
+    const lineUserId = event.source.type === "user" ? event.source.userId : undefined;
+    const replyText = await orchestrator.handleChatMessage(event.message.text, lineUserId);
     await lineClient.replyMessage({
       replyToken: event.replyToken,
       messages: [

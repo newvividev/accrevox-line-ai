@@ -5,8 +5,10 @@ import {
   ProductSearchResult,
   QuotationPayload
 } from "./accrevoxClient.js";
+import { DocumentType, Prisma } from "@prisma/client";
 import { AiAccessPolicy } from "./aiAccessPolicy.js";
 import { CreditLedger } from "./creditLedger.js";
+import { DocumentRequestPrismaRepository } from "../repositories/documentRequestPrismaRepository.js";
 import { parseChatCommand } from "./intentParser.js";
 import { TenantConfig } from "../types/tenant.js";
 
@@ -68,53 +70,93 @@ export class DocumentOrchestrator {
     private readonly client: AccrevoxClient,
     private readonly tenant: TenantConfig,
     private readonly aiAccessPolicy: AiAccessPolicy,
-    private readonly creditLedger: CreditLedger
+    private readonly creditLedger: CreditLedger,
+    private readonly documentRequestRepository: DocumentRequestPrismaRepository
   ) {}
 
-  async handleChatMessage(message: string): Promise<string> {
-    const parsed = parseChatCommand(message);
+  async handleChatMessage(message: string, lineUserId?: string): Promise<string> {
+    const documentRequest = await this.documentRequestRepository.createReceivedRequest({
+      tenantId: this.tenant.id,
+      lineUserId,
+      sourceText: message,
+      documentType: DocumentType.quotation
+    });
 
-    if (parsed.kind === "unsupported") {
-      const aiDecision = await this.aiAccessPolicy.evaluateIntentParsing(this.tenant);
-      const aiHint = aiDecision.allowed
-        ? "ในขั้นถัดไปสามารถต่อ AI parser สำหรับภาษาธรรมชาติได้"
-        : `ตอนนี้ระบบจะใช้คำสั่งแบบตายตัว: ${aiDecision.reason}`;
+    try {
+      const parsed = parseChatCommand(message);
 
-      return [
-        parsed.reason,
-        "",
-        aiHint,
-        "",
-        "ตัวอย่าง:",
-        "ออกใบเสนอราคา ลูกค้า=บริษัท ABC วันที่=2026-05-03 รายการ=ปากกา,10,20;สมุด,5,50"
-      ].join("\n");
+      if (parsed.kind === "unsupported") {
+        const aiDecision = await this.aiAccessPolicy.evaluateIntentParsing(this.tenant);
+        const aiHint = aiDecision.allowed
+          ? "ในขั้นถัดไปสามารถต่อ AI parser สำหรับภาษาธรรมชาติได้"
+          : `ตอนนี้ระบบจะใช้คำสั่งแบบตายตัว: ${aiDecision.reason}`;
+
+        await this.documentRequestRepository.markAsFailed({
+          documentRequestId: documentRequest.id,
+          message: parsed.reason
+        });
+
+        return [
+          parsed.reason,
+          "",
+          aiHint,
+          "",
+          "ตัวอย่าง:",
+          "ออกใบเสนอราคา ลูกค้า=บริษัท ABC วันที่=2026-05-03 รายการ=ปากกา,10,20;สมุด,5,50"
+        ].join("\n");
+      }
+
+      const parsedPayloadJson: Prisma.InputJsonValue = {
+        contactName: parsed.contactName,
+        issuedDate: parsed.issuedDate,
+        items: parsed.items
+      };
+      await this.documentRequestRepository.markAsValidating(documentRequest.id, parsedPayloadJson);
+
+      const contacts = await this.client.searchContacts(parsed.contactName);
+      const contact = await requireSingleMatch(contacts, "ลูกค้า", parsed.contactName);
+      const products = await mapProducts(this.client, parsed.items.map((item) => item.productName));
+
+      const payload: QuotationPayload = {
+        issuedDate: parsed.issuedDate,
+        branchCode: this.tenant.defaults.branchCode,
+        contactId: contact.id,
+        vatMethod: this.tenant.defaults.vatMethod,
+        priceMethod: this.tenant.defaults.priceMethod,
+        approvalPerson: this.tenant.defaults.approvalPerson || undefined,
+        createdPerson: this.tenant.defaults.createdPerson || undefined,
+        items: parsed.items.map((item) => ({
+          productId: products.get(item.productName)!.id,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          description: item.productName
+        }))
+      };
+
+      const created = await this.client.createQuotation(payload);
+      await this.documentRequestRepository.markAsSubmitted(
+        documentRequest.id,
+        created.trackingId,
+        created.documentNumber,
+        payload as Prisma.InputJsonValue
+      );
+
+      return this.buildFinalMessage(documentRequest.id, created, payload as Prisma.InputJsonValue);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : "Unknown document orchestration error";
+      await this.documentRequestRepository.markAsFailed({
+        documentRequestId: documentRequest.id,
+        message: messageText
+      });
+      throw error;
     }
-
-    const contacts = await this.client.searchContacts(parsed.contactName);
-    const contact = await requireSingleMatch(contacts, "ลูกค้า", parsed.contactName);
-    const products = await mapProducts(this.client, parsed.items.map((item) => item.productName));
-
-    const payload: QuotationPayload = {
-      issuedDate: parsed.issuedDate,
-      branchCode: this.tenant.defaults.branchCode,
-      contactId: contact.id,
-      vatMethod: this.tenant.defaults.vatMethod,
-      priceMethod: this.tenant.defaults.priceMethod,
-      approvalPerson: this.tenant.defaults.approvalPerson || undefined,
-      createdPerson: this.tenant.defaults.createdPerson || undefined,
-      items: parsed.items.map((item) => ({
-        productId: products.get(item.productName)!.id,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        description: item.productName
-      }))
-    };
-
-    const created = await this.client.createQuotation(payload);
-    return this.buildFinalMessage(created);
   }
 
-  private async buildFinalMessage(created: CreateDocumentResponse): Promise<string> {
+  private async buildFinalMessage(
+    documentRequestId: string,
+    created: CreateDocumentResponse,
+    parsedPayloadJson?: Prisma.InputJsonValue
+  ): Promise<string> {
     const job = await pollUntilDone(this.client, created.trackingId);
 
     if (job.status === "failed") {
@@ -122,12 +164,29 @@ export class DocumentOrchestrator {
         .map((error) => `${error.code}: ${error.message}`)
         .join("\n");
 
+      await this.documentRequestRepository.markJobFailed(
+        documentRequestId,
+        errorText || job.message,
+        job as unknown as Prisma.InputJsonValue
+      );
+
       return [
         `สร้างเอกสารไม่สำเร็จ`,
         `เลขเอกสาร: ${created.documentNumber}`,
         errorText || job.message
       ].join("\n");
     }
+
+    await this.documentRequestRepository.markAsCompleted({
+      documentRequestId,
+      trackingId: created.trackingId,
+      documentNumber: created.documentNumber,
+      parsedPayloadJson,
+      accrevoxDocumentId: job.result?.id,
+      pdfUrl: job.result?.pdfUrl,
+      message: job.message,
+      rawResultJson: job as unknown as Prisma.InputJsonValue
+    });
 
     return [
       `สร้างใบเสนอราคาสำเร็จ`,

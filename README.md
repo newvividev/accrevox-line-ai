@@ -187,6 +187,24 @@ curl -X POST http://localhost:3000/admin/tenants/demo/wallet/topup \
 - `ChatSession` สำหรับรองรับการคุยต่อเนื่อง
 - `DocumentRequest` และ `DocumentJob` สำหรับ audit และติดตามงานเอกสาร
 
+## Audit Flow ของคำสั่ง LINE
+
+เมื่อมีข้อความสั่งงานเข้ามาจาก LINE ระบบจะ:
+
+1. สร้าง `DocumentRequest` สถานะ `received`
+2. parse ข้อความและอัปเดตเป็น `validating`
+3. เมื่อส่งเข้า Accrevox สำเร็จ จะอัปเดตเป็น `submitted` และสร้าง `DocumentJob` พร้อม `trackingId`
+4. เมื่อ job สำเร็จ จะอัปเดต `DocumentRequest` เป็น `completed`
+5. ถ้าพบข้อผิดพลาดระหว่าง parse หรือ job fail จะอัปเดตเป็น `failed`
+
+แนวทางนี้ช่วยให้ตามย้อนหลังได้ว่า:
+
+- ใครส่งข้อความอะไรเข้ามา
+- ระบบ parse ได้หรือไม่
+- ส่งเข้า Accrevox แล้วหรือยัง
+- job ไหนล้มเหลว
+- ได้เลขเอกสารและ PDF กลับมาหรือไม่
+
 ## Repository Layer ที่มีในรอบนี้
 
 - Prisma-backed tenant repository สำหรับโหลด config ต่อ tenant จากฐานข้อมูล
