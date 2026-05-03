@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: accrevox-line-db
+    environment:
+      POSTGRES_DB: accrevox_line_mvp
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d accrevox_line_mvp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+    container_name: accrevox-line-app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/accrevox_line_mvp?schema=public
+      LINE_CHANNEL_SECRET: your-line-channel-secret
+      LINE_CHANNEL_ACCESS_TOKEN: your-line-channel-access-token
+      ACCREVOX_BASE_URL: https://your-accrevox-host
+      ACCREVOX_CLIENT_ID: your-client-id
+      ACCREVOX_CLIENT_SECRET: your-client-secret
+      ACCREVOX_COMPANY_API_KEY: your-company-api-key
+      DEFAULT_BRANCH_CODE: 00000
+      DEFAULT_VAT_METHOD: PER_ITEM
+      DEFAULT_PRICE_METHOD: INCLUSIVE
+      DEFAULT_APPROVAL_PERSON: ""
+      DEFAULT_CREATED_PERSON: ""
+      BOOTSTRAP_TENANT_ID: demo
+      BOOTSTRAP_TENANT_NAME: Demo Company
+      BOOTSTRAP_PACKAGE_PLAN: core
+      BOOTSTRAP_AI_MODE: credit
+      BOOTSTRAP_AI_ADDON_ENABLED: "true"
+      BOOTSTRAP_AI_CREDIT_BALANCE: "1000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    command: npm run dev
+
+volumes:
+  postgres_data:

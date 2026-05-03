@@ -1,0 +1,183 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PackagePlan {
+  core
+  pro
+  enterprise
+}
+
+enum AiMode {
+  disabled
+  credit
+  byo_key
+}
+
+enum ChatSessionStatus {
+  active
+  closed
+}
+
+enum DocumentType {
+  quotation
+  invoice
+  receipt
+  payment_voucher
+}
+
+enum DocumentRequestStatus {
+  received
+  validating
+  submitted
+  completed
+  failed
+}
+
+enum JobStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+enum CreditTransactionType {
+  topup
+  debit
+  refund
+  adjustment
+}
+
+model Tenant {
+  id                 String               @id @default(cuid())
+  code               String               @unique
+  name               String
+  packagePlan        PackagePlan          @default(core)
+  aiAddonEnabled     Boolean              @default(false)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  lineChannels       LineChannel[]
+  accrevoxConnection AccrevoxConnection?
+  aiSubscription     AiSubscription?
+  creditWallet       CreditWallet?
+  chatSessions       ChatSession[]
+  documentRequests   DocumentRequest[]
+}
+
+model LineChannel {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  channelId          String?
+  channelSecret      String
+  channelAccessToken String
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, isActive])
+}
+
+model AccrevoxConnection {
+  id             String   @id @default(cuid())
+  tenantId       String   @unique
+  baseUrl        String
+  clientId       String
+  clientSecret   String
+  companyApiKey  String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model AiSubscription {
+  id                  String   @id @default(cuid())
+  tenantId            String   @unique
+  mode                AiMode   @default(disabled)
+  byoKeyReference     String?
+  isEnabled           Boolean  @default(false)
+  monthlyCreditLimit  Int?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model CreditWallet {
+  id             String              @id @default(cuid())
+  tenantId       String              @unique
+  balance        Int                 @default(0)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  transactions   CreditTransaction[]
+}
+
+model CreditTransaction {
+  id             String                @id @default(cuid())
+  walletId       String
+  type           CreditTransactionType
+  amount         Int
+  balanceAfter   Int
+  reason         String
+  referenceType  String?
+  referenceId    String?
+  createdAt      DateTime              @default(now())
+  wallet         CreditWallet          @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId, createdAt])
+}
+
+model ChatSession {
+  id                String            @id @default(cuid())
+  tenantId          String
+  lineUserId        String
+  lineConversationId String?
+  status            ChatSessionStatus @default(active)
+  lastMessageAt     DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, lineUserId, status])
+}
+
+model DocumentRequest {
+  id                String                @id @default(cuid())
+  tenantId          String
+  sessionId         String?
+  lineUserId        String?
+  documentType      DocumentType
+  status            DocumentRequestStatus @default(received)
+  sourceText        String
+  parsedPayloadJson Json?
+  documentNumber    String?
+  accrevoxDocumentId String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  tenant            Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  session           ChatSession?          @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  jobs              DocumentJob[]
+
+  @@index([tenantId, documentType, status])
+}
+
+model DocumentJob {
+  id                 String     @id @default(cuid())
+  documentRequestId  String
+  trackingId         String     @unique
+  status             JobStatus  @default(pending)
+  message            String?
+  pdfUrl             String?
+  rawResultJson      Json?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  documentRequest    DocumentRequest @relation(fields: [documentRequestId], references: [id], onDelete: Cascade)
+
+  @@index([documentRequestId, status])
+}

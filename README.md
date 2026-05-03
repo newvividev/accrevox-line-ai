@@ -1,0 +1,176 @@
+# Accrevox LINE MVP
+
+MVP นี้เป็น backend ตัวกลางระหว่าง `LINE Official Account` กับ `Accrevox Partner API` เพื่อให้ผู้ใช้สั่งออกเอกสารผ่านแชต และให้ระบบตอบกลับเป็นสถานะหรือลิงก์ไฟล์ PDF
+
+## ขอบเขตของ MVP
+
+- รองรับ `ใบเสนอราคา` ก่อนเป็นลำดับแรก
+- ใช้รูปแบบคำสั่งแบบกึ่งโครงสร้าง เพื่อลดความคลุมเครือ
+- ค้นหา `contactId` และ `productId` จากชื่อก่อนยิง API
+- สร้างเอกสารผ่าน `POST /api/v1/quotations`
+- poll `GET /api/v1/documents/jobs/{trackingId}` จน job เสร็จ
+- ตอบกลับใน LINE ด้วยเลขเอกสาร สถานะ และลิงก์ PDF เมื่อมีข้อมูลพร้อม
+- รองรับแนวทางธุรกิจแบบ `แพ็กเกจหลัก + AI Add-on + เครดิต`
+- วางโครงสร้าง `multi-tenant` ตั้งแต่ต้น
+
+## โมเดลธุรกิจที่ใช้
+
+- `แพ็กเกจหลัก` คือความสามารถพื้นฐาน เช่น webhook, orchestration, ออกเอกสารผ่าน Accrevox API
+- `AI Add-on` เป็นสิทธิ์เปิดใช้งานความสามารถตีความภาษาธรรมชาติ
+- `เครดิต` ใช้สำหรับหัก usage เมื่อมีการเรียก AI จริง
+
+แนวคิดสำคัญ:
+
+- ถ้าข้อความ parse ได้ด้วย rule-based parser จะไม่หักเครดิต
+- จะหักเครดิตเฉพาะตอนเรียก AI จริง
+- ถ้า tenant ไม่มี AI add-on หรือเครดิตไม่พอ ระบบยังทำงานต่อได้ในโหมดคำสั่งแบบตายตัว
+
+## สิ่งที่สเปกปัจจุบันรองรับ
+
+จาก Partner API Spec v1.1:
+
+- token: `POST /api/v1/token`
+- contacts: `GET /api/v1/contacts`
+- products: `GET /api/v1/products`
+- quotations: `POST /api/v1/quotations`
+- async job status: `GET /api/v1/documents/jobs/{trackingId}`
+
+หมายเหตุ:
+
+- สเปกนี้ยังไม่เห็น endpoint สำหรับ `ใบสำคัญจ่าย`
+- ในเอกสารมีคำอธิบายว่า job result ของ document ควรมี `pdfUrl` แต่ตัวอย่าง response แสดงเพียง `id` จึงควรทดสอบกับระบบจริงอีกครั้ง
+
+## รูปแบบคำสั่งที่แนะนำสำหรับ MVP
+
+ให้ผู้ใช้พิมพ์แบบนี้ก่อน:
+
+```text
+ออกใบเสนอราคา ลูกค้า=บริษัท ABC วันที่=2026-05-03 รายการ=ปากกา,10,20;สมุด,5,50
+```
+
+กติกา:
+
+- `ลูกค้า=` ใช้ชื่อสำหรับค้นหา contact
+- `วันที่=` ใช้รูปแบบ `YYYY-MM-DD`
+- `รายการ=` แยกหลายรายการด้วย `;`
+- แต่ละรายการใช้รูปแบบ `ชื่อสินค้า,จำนวน,ราคาต่อหน่วย`
+
+## ลำดับการทำงาน
+
+1. LINE ส่ง webhook event เข้ามาที่ backend
+2. backend parse ข้อความเป็น intent และข้อมูลเอกสาร
+3. backend ค้นหา contact และ product ใน Accrevox
+4. backend สร้าง quotation
+5. backend poll job status
+6. backend ส่งข้อความกลับ LINE
+
+## โครงสร้างไฟล์
+
+```text
+prisma/
+  schema.prisma
+src/
+  app.ts
+  config.ts
+  db.ts
+  index.ts
+  repositories/
+    creditWalletPrismaRepository.ts
+    tenantPrismaRepository.ts
+  routes/
+    lineWebhook.ts
+  services/
+    accrevoxClient.ts
+    aiAccessPolicy.ts
+    creditLedger.ts
+    documentOrchestrator.ts
+    intentParser.ts
+  types/
+    tenant.ts
+```
+
+## วิธีรัน
+
+```bash
+npm install
+npx prisma generate
+npm run dev
+```
+
+## วิธีรันด้วย Docker
+
+```bash
+docker compose up --build
+```
+
+ถ้ารันครั้งแรก ให้เปิดอีก terminal แล้วสั่ง:
+
+```bash
+docker compose exec app npx prisma migrate dev --name init
+docker compose exec app npm run prisma:seed
+```
+
+หลังจากนั้น app จะพร้อมที่:
+
+- `http://localhost:3000/health`
+
+PostgreSQL จะพร้อมที่:
+
+- host: `localhost`
+- port: `5432`
+- database: `accrevox_line_mvp`
+- username: `postgres`
+- password: `postgres`
+
+ข้อมูลเริ่มต้นที่ seed ให้:
+
+- tenant code: `demo`
+- package plan: `core`
+- AI add-on: `enabled`
+- AI mode: `credit`
+- เครดิตเริ่มต้น: `1000`
+
+## Webhook ที่ต้องตั้งใน LINE
+
+- URL: `POST /webhooks/line/:tenantId`
+
+ตัวอย่าง:
+
+- `https://your-domain.com/webhooks/line/demo`
+
+แนวทางนี้เหมาะกับตอนเริ่มต้น เพราะแยก tenant ได้ชัดเจนโดยไม่ต้องพึ่ง database ก่อน ใน production ค่อยขยับไป map tenant จาก channel หรือ database ได้
+
+ระหว่างพัฒนาในเครื่อง แนะนำเปิดผ่าน tunnel เช่น ngrok หรือ Cloudflare Tunnel แล้วนำ URL ไปใส่ใน LINE Developers Console
+
+## สิ่งที่ควรทำต่อทันที
+
+1. ต่อ OpenAI หรือ parser ที่ต้องการเข้ากับ `intentParser.ts` โดยเรียกผ่านชั้น `aiAccessPolicy.ts`
+2. เพิ่ม database หรือ Redis สำหรับเก็บ tenant, session, credit ledger และ usage log
+3. เพิ่ม allowlist ผู้ใช้ LINE ที่มีสิทธิ์ออกเอกสาร
+4. เพิ่ม fallback flow เมื่อค้นหาลูกค้าหรือสินค้าเจอหลายรายการ
+5. ยืนยัน field สำหรับดาวน์โหลด PDF จาก job result กับระบบ Accrevox จริง
+6. กำหนดราคาเครดิต เช่น 1 คำสั่ง AI = 1 เครดิต หรือคิดตามระดับความซับซ้อน
+
+## สิ่งที่ schema รอบนี้ครอบคลุม
+
+- `Tenant` สำหรับแยกบริษัท
+- `LineChannel` สำหรับผูก LINE OA ต่อ tenant
+- `AccrevoxConnection` สำหรับเก็บ credentials ต่อ tenant
+- `AiSubscription` สำหรับแพ็กเกจ AI add-on และโหมดการใช้งาน
+- `CreditWallet` และ `CreditTransaction` สำหรับเครดิตคงเหลือและ ledger
+- `ChatSession` สำหรับรองรับการคุยต่อเนื่อง
+- `DocumentRequest` และ `DocumentJob` สำหรับ audit และติดตามงานเอกสาร
+
+## Repository Layer ที่มีในรอบนี้
+
+- Prisma-backed tenant repository สำหรับโหลด config ต่อ tenant จากฐานข้อมูล
+- Prisma-backed credit wallet repository สำหรับดูยอดเครดิตและตัดเครดิต
+
+แนวทางนี้ช่วยให้รอบถัดไปต่อ admin API หรือ billing dashboard ได้ง่าย โดยไม่ต้องรื้อ service เดิม
+
+## เรื่องใบสำคัญจ่าย
+
+ถ้าจะรองรับ `ใบสำคัญจ่าย` ผ่าน flow เดียวกัน มี 2 ทาง:
+
+1. เพิ่ม endpoint ใน Partner API ให้สร้างเอกสารชนิดนี้ได้โดยตรง
+2. ทำ workflow ชั่วคราวให้บอทเก็บข้อมูลและส่งต่อให้เจ้าหน้าที่หรือระบบภายในสร้างเอกสารแทน
